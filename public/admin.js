@@ -173,9 +173,9 @@ function buildTeamCard(team, index) {
       </div>
       <div class="team-editor-row">
         <div>
-          <div class="field-label">Colour (hex)</div>
-          <input type="text" class="team-field team-color-input" data-index="${index}" data-field="color"
-            value="${escHtml(color)}" placeholder="#3e8948" maxlength="7" />
+          <div class="field-label">Colour</div>
+          <input type="color" class="team-field team-color-input" data-index="${index}" data-field="color"
+            value="${escHtml(color)}" />
         </div>
         <div>
           <div class="field-label">Manual Adjustment (pts)</div>
@@ -284,9 +284,6 @@ function validateTeams(teams) {
 
     if (d0 && d1 && d0 === d1) errors.push(`${label}: Both drivers cannot be the same.`);
 
-    if (team.color && !/^#[0-9a-fA-F]{6}$/.test(team.color)) {
-      errors.push(`${label}: Colour must be a 6-digit hex (e.g. #3e8948).`);
-    }
   });
 
   return errors;
