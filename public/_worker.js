@@ -39,8 +39,10 @@ export default {
       return handleVerifyPassword(request, env);
     }
 
-    // Dev-only seed endpoint — only available when ADMIN_PASSWORD is not set (local dev)
-    if (url.pathname === '/api/seed' && request.method === 'POST' && !env.ADMIN_PASSWORD) {
+    // Seed endpoint — password-protected, useful in dev and for manual data loading
+    if (url.pathname === '/api/seed' && request.method === 'POST') {
+      const authErr = checkAuth(request, env);
+      if (authErr) return authErr;
       return handleSeed(request, env);
     }
 
@@ -120,8 +122,7 @@ async function handleVerifyPassword(request, env) {
 function checkAuth(request, env) {
   const authHeader = request.headers.get('Authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  const expectedPassword = env.ADMIN_PASSWORD || 'dev';
-  if (token !== expectedPassword) {
+  if (!env.ADMIN_PASSWORD || token !== env.ADMIN_PASSWORD) {
     return new Response(JSON.stringify({ error: 'Unauthorised' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
