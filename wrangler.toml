@@ -1,0 +1,14 @@
+name = "fantasy-f1-v2"
+compatibility_date = "2026-01-01"
+pages_build_output_dir = "public"
+
+[[kv_namespaces]]
+binding = "F1_DATA"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_KV_PREVIEW_NAMESPACE_ID"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+# ADMIN_PASSWORD is set via the Cloudflare dashboard (Secrets) — never commit it here.
+# To set it: wrangler pages secret put ADMIN_PASSWORD

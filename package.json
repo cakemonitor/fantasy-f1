@@ -1,0 +1,13 @@
+{
+  "name": "fantasy-f1-v2",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev public --kv F1_DATA",
+    "deploy": "wrangler pages deploy public",
+    "cron:test": "wrangler dev functions/_worker.js --test-scheduled"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

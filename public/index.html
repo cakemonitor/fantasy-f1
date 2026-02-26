@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fantasy F1 2026</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>Fantasy F1 <span class="season-year">2026</span></h1>
+      <button class="admin-btn" id="admin-trigger" aria-label="Admin panel">⚙</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="event-status" aria-label="Event status">
+      <div class="section-label">Calendar</div>
+      <div id="event-rows" class="event-rows">
+        <div class="event-row skeleton"></div>
+        <div class="event-row skeleton"></div>
+        <div class="event-row skeleton"></div>
+      </div>
+    </section>
+
+    <div class="main-columns">
+      <section id="leaderboard" aria-label="Leaderboard">
+        <div class="section-label">Leaderboard</div>
+        <div id="team-cards" class="team-cards">
+          <div class="team-card skeleton"></div>
+          <div class="team-card skeleton"></div>
+          <div class="team-card skeleton"></div>
+        </div>
+      </section>
+
+      <section id="chart-container" aria-label="Points progression">
+        <div class="section-label">Points Progression</div>
+        <div class="chart-wrap">
+          <canvas id="points-chart"></canvas>
+        </div>
+      </section>
+    </div>
+
+    <div id="error-banner" class="error-banner" hidden>
+      <span id="error-message"></span>
+    </div>
+  </main>
+
+  <dialog id="admin-panel" aria-label="Admin panel">
+    <div class="dialog-header">
+      <h2>Admin — Team Configuration</h2>
+      <button class="close-btn" id="admin-close" aria-label="Close">✕</button>
+    </div>
+
+    <div id="admin-auth" class="admin-section">
+      <p class="admin-hint">Enter the admin password to manage teams.</p>
+      <div class="input-row">
+        <input
+          type="password"
+          id="admin-password"
+          placeholder="Password"
+          autocomplete="current-password"
+        />
+        <button id="admin-login">Unlock</button>
+      </div>
+      <p id="auth-error" class="field-error" hidden>Incorrect password.</p>
+    </div>
+
+    <div id="admin-editor" class="admin-section" hidden>
+      <div id="team-editor-list" class="team-editor-list"></div>
+      <div class="editor-actions">
+        <button id="add-team-btn" class="secondary-btn">+ Add Team</button>
+        <button id="save-teams-btn">Save Changes</button>
+      </div>
+      <p id="save-status" class="save-status" hidden></p>
+    </div>
+  </dialog>
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
+    integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC"
+    crossorigin="anonymous"
+  ></script>
+  <script src="app.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>
