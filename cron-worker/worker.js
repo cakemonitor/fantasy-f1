@@ -57,12 +57,15 @@ async function runCron(env) {
 
   console.log(`[cron] Checking ${eventsToCheck.length} event(s)`);
 
+  // Fetch driver roster once — numbers/names are stable across the season
+  const driverMap = await loadDriverRoster(eventsToCheck[0]);
+
   let changed = false;
 
   for (const event of eventsToCheck) {
     console.log(`[cron] Fetching standings for ${event.key}`);
     try {
-      const newStandings = await fetchStandingsForEvent(event, standings);
+      const newStandings = await fetchStandingsForEvent(event, driverMap);
       if (newStandings && Object.keys(newStandings).length > 0) {
         standings[event.key] = newStandings;
         changed = true;
@@ -121,13 +124,50 @@ function getEventsNeedingUpdate(calendar, standings, now) {
 }
 
 /**
+ * Fetch driver roster once for the season.
+ * driver_number → driver info (name_acronym, first_name, last_name).
+ * Uses any event's session to find a valid session_key.
+ */
+async function loadDriverRoster(anyEvent) {
+  try {
+    const sessionKey = await resolveSessionKey(anyEvent);
+    if (!sessionKey) return {};
+    const res = await fetchWithTimeout(`${OPENF1_BASE}/drivers?session_key=${sessionKey}`, 10_000);
+    if (!res.ok) return {};
+    const drivers = await res.json();
+    const map = {};
+    for (const d of drivers) {
+      if (d.driver_number) map[d.driver_number] = d;
+    }
+    console.log(`[cron] Loaded roster: ${Object.keys(map).length} drivers`);
+    return map;
+  } catch (err) {
+    console.warn(`[cron] Could not load driver roster: ${err.message}`);
+    return {};
+  }
+}
+
+/**
  * Fetch standings for a single event from OpenF1 championship_drivers (beta).
  * Falls back to computing from race results if that fails.
  */
-async function fetchStandingsForEvent(event, existingStandings) {
+async function fetchStandingsForEvent(event, driverMap) {
+  // Resolve session key once — shared by both methods below
+  let sessionKey;
+  try {
+    sessionKey = await resolveSessionKey(event);
+  } catch (err) {
+    console.error(`[cron] Failed to resolve session key for ${event.key}: ${err.message}`);
+    return null;
+  }
+  if (!sessionKey) {
+    console.warn(`[cron] No session found for ${event.key}`);
+    return null;
+  }
+
   // Try OpenF1 championship_drivers endpoint
   try {
-    const result = await fetchOpenF1Championship(event);
+    const result = await fetchOpenF1Championship(sessionKey, driverMap);
     if (result && Object.keys(result).length > 0) return result;
   } catch (err) {
     console.warn(`[cron] OpenF1 championship failed for ${event.key}: ${err.message}`);
@@ -136,7 +176,7 @@ async function fetchStandingsForEvent(event, existingStandings) {
   // Fallback: compute from race/sprint results
   console.log(`[cron] Falling back to results computation for ${event.key}`);
   try {
-    return await computeStandingsFromResults(event, existingStandings);
+    return await computeStandingsFromResults(sessionKey, event.type, driverMap);
   } catch (err) {
     console.error(`[cron] Fallback also failed for ${event.key}: ${err.message}`);
     return null;
@@ -144,71 +184,78 @@ async function fetchStandingsForEvent(event, existingStandings) {
 }
 
 /**
+ * Resolve the OpenF1 session_key for an event.
+ */
+async function resolveSessionKey(event) {
+  const sessionName = event.type === 'sprint' ? 'Sprint' : 'Race';
+  const url = `${OPENF1_BASE}/sessions?year=${SEASON}&session_type=Race&session_name=${sessionName}&date_start>=${event.startUtc.slice(0, 10)}`;
+  const res = await fetchWithTimeout(url, 10_000);
+  if (!res.ok) throw new Error(`OpenF1 sessions HTTP ${res.status}`);
+  const sessions = await res.json();
+
+  const eventDate = new Date(event.startUtc).getTime();
+  const session = sessions
+    .map(s => ({ ...s, _diff: Math.abs(new Date(s.date_start).getTime() - eventDate) }))
+    .sort((a, b) => a._diff - b._diff)[0];
+
+  return session?.session_key ?? null;
+}
+
+/**
  * Fetch from OpenF1 championship_drivers (beta endpoint).
  * Returns { [driverCode]: { name, points } } or null.
+ * Points are incremental for this session: points_current - points_start.
  */
-async function fetchOpenF1Championship(event) {
-  // Fetch championship standings and driver acronyms in parallel
-  const [champRes, driversRes] = await Promise.all([
-    fetchWithTimeout(`${OPENF1_BASE}/championship_drivers?season=${SEASON}`, 10_000),
-    fetchWithTimeout(`${OPENF1_BASE}/drivers?season=${SEASON}`, 10_000),
-  ]);
+async function fetchOpenF1Championship(sessionKey, driverMap) {
+  // Only fetch driver info if we don't already have the season roster
+  const resolvedDriverMap = Object.keys(driverMap).length > 0
+    ? driverMap
+    : await fetchSessionDriverMap(sessionKey);
+
+  const champRes = await fetchWithTimeout(`${OPENF1_BASE}/championship_drivers?session_key=${sessionKey}`, 10_000);
   if (!champRes.ok) throw new Error(`OpenF1 championship HTTP ${champRes.status}`);
-  if (!driversRes.ok) throw new Error(`OpenF1 drivers HTTP ${driversRes.status}`);
 
   const data = await champRes.json();
-  const driversData = await driversRes.json();
-
   if (!Array.isArray(data) || data.length === 0) return null;
 
-  // Build driver_number → name_acronym lookup
-  const acronymMap = {};
-  for (const d of driversData) {
-    if (d.driver_number && d.name_acronym) acronymMap[d.driver_number] = d.name_acronym;
-  }
-
-  // OpenF1 returns cumulative standings — we need to find the incremental points
-  // for this specific round vs the previous round.
-  // For now, return cumulative standings keyed by driver code.
-  // app.js sums across rounds, so we store per-round increments.
-  // If the endpoint doesn't support per-round data, we store total and recompute later.
-  // TODO: revisit once the beta endpoint is documented more fully.
-
   const result = {};
-  for (const driver of data) {
-    const code = acronymMap[driver.driver_number];
-    if (!code) throw new Error(`No acronym found for driver number ${driver.driver_number}`);
-    result[code] = {
+  for (const entry of data) {
+    const driver = resolvedDriverMap[entry.driver_number];
+    if (!driver?.name_acronym) {
+      // Driver raced earlier in the season but not this session (e.g. mid-season replacement)
+      console.warn(`[cron] No session entry for driver_number=${entry.driver_number} — skipping`);
+      continue;
+    }
+    result[driver.name_acronym] = {
       name:   `${driver.first_name || ''} ${driver.last_name || ''}`.trim(),
-      points: driver.points || 0,
+      points: (entry.points_current || 0) - (entry.points_start || 0),
     };
   }
   return result;
 }
 
 /**
+ * Fetch driver_number → driver info for a specific session.
+ * Used as a fallback when no pre-loaded roster is available.
+ */
+async function fetchSessionDriverMap(sessionKey) {
+  const res = await fetchWithTimeout(`${OPENF1_BASE}/drivers?session_key=${sessionKey}`, 10_000);
+  if (!res.ok) throw new Error(`OpenF1 drivers HTTP ${res.status}`);
+  const drivers = await res.json();
+  const map = {};
+  for (const d of drivers) {
+    if (d.driver_number) map[d.driver_number] = d;
+  }
+  return map;
+}
+
+/**
  * Compute standings for a round from OpenF1 race/sprint results.
  * Returns incremental points for this round only.
  */
-async function computeStandingsFromResults(event, existingStandings) {
-  const sessionName = event.type === 'sprint' ? 'Sprint' : 'Race';
-
-  // Fetch session key from OpenF1 sessions
-  const sessionsUrl = `${OPENF1_BASE}/sessions?year=${SEASON}&session_type=Race&session_name=${sessionName}&date_start>=${event.startUtc.slice(0,10)}`;
-  const sessRes = await fetchWithTimeout(sessionsUrl, 10_000);
-  if (!sessRes.ok) throw new Error(`OpenF1 sessions HTTP ${sessRes.status}`);
-  const sessions = await sessRes.json();
-
-  // Find the closest session to our event date
-  const eventDate = new Date(event.startUtc).getTime();
-  const session = sessions
-    .map(s => ({ ...s, _diff: Math.abs(new Date(s.date_start).getTime() - eventDate) }))
-    .sort((a, b) => a._diff - b._diff)[0];
-
-  if (!session) throw new Error('No matching session found');
-
+async function computeStandingsFromResults(sessionKey, eventType, driverMap) {
   // Fetch race results (position data)
-  const resultsUrl = `${OPENF1_BASE}/position?session_key=${session.session_key}`;
+  const resultsUrl = `${OPENF1_BASE}/position?session_key=${sessionKey}`;
   const resRes = await fetchWithTimeout(resultsUrl, 15_000);
   if (!resRes.ok) throw new Error(`OpenF1 position HTTP ${resRes.status}`);
   const positions = await resRes.json();
@@ -222,22 +269,16 @@ async function computeStandingsFromResults(event, existingStandings) {
     }
   }
 
-  // Fetch driver info for this session
-  const driversUrl = `${OPENF1_BASE}/drivers?session_key=${session.session_key}`;
-  const drRes = await fetchWithTimeout(driversUrl, 10_000);
-  if (!drRes.ok) throw new Error(`OpenF1 drivers HTTP ${drRes.status}`);
-  const drivers = await drRes.json();
+  // Use pre-loaded roster if available, otherwise fetch for this session
+  const resolvedDriverMap = Object.keys(driverMap).length > 0
+    ? driverMap
+    : await fetchSessionDriverMap(sessionKey);
 
-  const driverMap = {};
-  for (const d of drivers) {
-    driverMap[d.driver_number] = d;
-  }
-
-  const pointsTable = event.type === 'sprint' ? SPRINT_POINTS : RACE_POINTS;
+  const pointsTable = eventType === 'sprint' ? SPRINT_POINTS : RACE_POINTS;
   const result = {};
 
   for (const [driverNum, pos] of Object.entries(finalPositions)) {
-    const driver = driverMap[driverNum];
+    const driver = resolvedDriverMap[driverNum];
     if (!driver) continue;
     const code = driver.name_acronym;
     const position = pos.position;
