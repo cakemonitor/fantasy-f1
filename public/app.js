@@ -117,7 +117,7 @@ function renderEventPanel(data) {
     rows.push({
       event: upcomingEvent,
       status: 'upcoming',
-      icon: '🗓',
+      icon: '🗓️',
       detail: formatUkDatetime(upcomingEvent.startUtc),
       past: false,
     });
