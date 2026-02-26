@@ -185,11 +185,13 @@ function buildMockData() {
 // ---------------------------------------------------------------------------
 
 function postSeed(payload) {
+  const password = process.env.ADMIN_PASSWORD || 'dev';
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
     const req = http.request(
       { hostname: 'localhost', port: DEV_PORT, path: '/api/seed', method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body),
+                   'Authorization': `Bearer ${password}` } },
       res => {
         let data = '';
         res.on('data', chunk => { data += chunk; });

@@ -60,7 +60,7 @@ async function runCron(env) {
   let changed = false;
 
   for (const event of eventsToCheck) {
-    console.log(`[cron] Fetching standings for ${event.key} (session: ${event.sessionKey})`);
+    console.log(`[cron] Fetching standings for ${event.key}`);
     try {
       const newStandings = await fetchStandingsForEvent(event, standings);
       if (newStandings && Object.keys(newStandings).length > 0) {
@@ -71,6 +71,8 @@ async function runCron(env) {
     } catch (err) {
       console.error(`[cron] Error fetching ${event.key}: ${err.message}`);
     }
+    // Respect OpenF1 free tier rate limit (3 req/s, 30 req/min)
+    await new Promise(r => setTimeout(r, 2000));
   }
 
   if (changed || !existing.calendar?.length) {
@@ -189,10 +191,10 @@ async function fetchOpenF1Championship(event) {
  * Returns incremental points for this round only.
  */
 async function computeStandingsFromResults(event, existingStandings) {
-  const sessionType = event.type === 'sprint' ? 'sprint' : 'race';
+  const sessionName = event.type === 'sprint' ? 'Sprint' : 'Race';
 
   // Fetch session key from OpenF1 sessions
-  const sessionsUrl = `${OPENF1_BASE}/sessions?year=${SEASON}&circuit_short_name=&session_type=${sessionType}&date_start>=${event.startUtc.slice(0,10)}`;
+  const sessionsUrl = `${OPENF1_BASE}/sessions?year=${SEASON}&session_type=Race&session_name=${sessionName}&date_start>=${event.startUtc.slice(0,10)}`;
   const sessRes = await fetchWithTimeout(sessionsUrl, 10_000);
   if (!sessRes.ok) throw new Error(`OpenF1 sessions HTTP ${sessRes.status}`);
   const sessions = await sessRes.json();
@@ -254,17 +256,17 @@ async function computeStandingsFromResults(event, existingStandings) {
  */
 async function fetchCalendar() {
   try {
-    const url = `${OPENF1_BASE}/sessions?year=${SEASON}&session_type=race`;
+    // OpenF1 uses session_type=Race (capitalised) for both races and sprints;
+    // session_name distinguishes them ('Race' vs 'Sprint').
+    const url = `${OPENF1_BASE}/sessions?year=${SEASON}&session_type=Race`;
     const res = await fetchWithTimeout(url, 15_000);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const sessions = await res.json();
+    const all = await res.json();
 
-    // Also fetch sprint sessions
-    const sprintUrl = `${OPENF1_BASE}/sessions?year=${SEASON}&session_type=sprint`;
-    const sprintRes = await fetchWithTimeout(sprintUrl, 15_000);
-    const sprintSessions = sprintRes.ok ? await sprintRes.json() : [];
+    const raceSessions   = all.filter(s => s.session_name === 'Race');
+    const sprintSessions = all.filter(s => s.session_name === 'Sprint');
 
-    // Group by circuit/meeting
+    // Group sprints by meeting_key for easy lookup
     const sprintByMeeting = {};
     for (const s of sprintSessions) {
       sprintByMeeting[s.meeting_key] = s;
@@ -275,9 +277,9 @@ async function fetchCalendar() {
     let round = 1;
 
     // Sort race sessions by date
-    sessions.sort((a, b) => new Date(a.date_start) - new Date(b.date_start));
+    raceSessions.sort((a, b) => new Date(a.date_start) - new Date(b.date_start));
 
-    for (const session of sessions) {
+    for (const session of raceSessions) {
       const sprint = sprintByMeeting[session.meeting_key];
       calendar.push({
         round,
