@@ -34,7 +34,7 @@ const CALENDAR = [
   { round: 14, name: "Dutch GP",          race: "2026-08-23T13:00:00Z", sprint: "2026-08-22T10:00:00Z" },
   { round: 15, name: "Italian GP",        race: "2026-09-06T13:00:00Z", sprint: null },
   { round: 16, name: "Madrid GP",         race: "2026-09-13T13:00:00Z", sprint: null },
-  { round: 17, name: "Azerbaijan GP",     race: "2026-09-27T11:00:00Z", sprint: null },
+  { round: 17, name: "Azerbaijan GP",     race: "2026-09-26T11:00:00Z", sprint: null },
   { round: 18, name: "Singapore GP",      race: "2026-10-11T12:00:00Z", sprint: "2026-10-10T09:00:00Z" },
   { round: 19, name: "United States GP",  race: "2026-10-25T20:00:00Z", sprint: null },
   { round: 20, name: "Mexican GP",        race: "2026-11-01T20:00:00Z", sprint: null },
