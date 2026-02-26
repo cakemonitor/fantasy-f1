@@ -146,12 +146,24 @@ async function fetchStandingsForEvent(event, existingStandings) {
  * Returns { [driverCode]: { name, points } } or null.
  */
 async function fetchOpenF1Championship(event) {
-  const url = `${OPENF1_BASE}/championship_drivers?season=${SEASON}`;
-  const res = await fetchWithTimeout(url, 10_000);
-  if (!res.ok) throw new Error(`OpenF1 championship HTTP ${res.status}`);
-  const data = await res.json();
+  // Fetch championship standings and driver acronyms in parallel
+  const [champRes, driversRes] = await Promise.all([
+    fetchWithTimeout(`${OPENF1_BASE}/championship_drivers?season=${SEASON}`, 10_000),
+    fetchWithTimeout(`${OPENF1_BASE}/drivers?season=${SEASON}`, 10_000),
+  ]);
+  if (!champRes.ok) throw new Error(`OpenF1 championship HTTP ${champRes.status}`);
+  if (!driversRes.ok) throw new Error(`OpenF1 drivers HTTP ${driversRes.status}`);
+
+  const data = await champRes.json();
+  const driversData = await driversRes.json();
 
   if (!Array.isArray(data) || data.length === 0) return null;
+
+  // Build driver_number → name_acronym lookup
+  const acronymMap = {};
+  for (const d of driversData) {
+    if (d.driver_number && d.name_acronym) acronymMap[d.driver_number] = d.name_acronym;
+  }
 
   // OpenF1 returns cumulative standings — we need to find the incremental points
   // for this specific round vs the previous round.
@@ -162,8 +174,8 @@ async function fetchOpenF1Championship(event) {
 
   const result = {};
   for (const driver of data) {
-    const code = driver.driver_number ? await resolveDriverCode(driver.driver_number) : driver.broadcast_name;
-    if (!code) continue;
+    const code = acronymMap[driver.driver_number];
+    if (!code) throw new Error(`No acronym found for driver number ${driver.driver_number}`);
     result[code] = {
       name:   `${driver.first_name || ''} ${driver.last_name || ''}`.trim(),
       points: driver.points || 0,
@@ -282,22 +294,6 @@ async function fetchCalendar() {
   } catch (err) {
     console.error(`[cron] Calendar fetch failed: ${err.message}`);
     return [];
-  }
-}
-
-/**
- * Resolve a driver number to a 3-letter acronym using OpenF1 drivers endpoint.
- * This is a best-effort helper; returns null if not found.
- */
-async function resolveDriverCode(driverNumber) {
-  try {
-    const url = `${OPENF1_BASE}/drivers?driver_number=${driverNumber}&season=${SEASON}`;
-    const res = await fetchWithTimeout(url, 5_000);
-    if (!res.ok) return null;
-    const drivers = await res.json();
-    return drivers[0]?.name_acronym || null;
-  } catch {
-    return null;
   }
 }
 

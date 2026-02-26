@@ -5,13 +5,6 @@
 
 'use strict';
 
-/* ---- Known 2026 driver codes for client-side validation ---- */
-const KNOWN_2026_DRIVERS = new Set([
-  'VER', 'NOR', 'LEC', 'PIA', 'SAI', 'RUS', 'HAM', 'ANT',
-  'ALO', 'STR', 'TSU', 'LAW', 'HUL', 'OCO', 'GAS', 'BEA',
-  'ALB', 'SAR', 'COL', 'DOO', 'HAD', 'BOR',
-]);
-
 const SESSION_KEY = 'f1_admin_password';
 
 /* ============================================================
@@ -277,10 +270,7 @@ function validateTeams(teams) {
 
     const [d0, d1] = team.drivers || [];
     if (!d0) errors.push(`${label}: Driver 1 code is required.`);
-    else if (!KNOWN_2026_DRIVERS.has(d0)) errors.push(`${label}: Unknown driver code "${d0}".`);
-
     if (!d1) errors.push(`${label}: Driver 2 code is required.`);
-    else if (!KNOWN_2026_DRIVERS.has(d1)) errors.push(`${label}: Unknown driver code "${d1}".`);
 
     if (d0 && d1 && d0 === d1) errors.push(`${label}: Both drivers cannot be the same.`);
 
