@@ -1,0 +1,11 @@
+name = "fantasy-f1-cron"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[kv_namespaces]]
+binding = "F1_DATA"
+id = "1b52376370bc41ef8ce405ed3aabab5f"
+preview_id = "99f988bef7394a21a3becf05b12bebfd"
+
+[triggers]
+crons = ["*/10 * * * *"]
