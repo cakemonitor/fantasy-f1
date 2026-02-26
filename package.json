@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "wrangler pages dev public --kv F1_DATA",
+    "seed": "node scripts/seed-dev-kv.js",
     "deploy": "wrangler pages deploy public",
     "cron:test": "wrangler dev functions/_worker.js --test-scheduled"
   },

@@ -39,7 +39,13 @@ export default {
       return handleVerifyPassword(request, env);
     }
 
-    return new Response('Not found', { status: 404 });
+    // Dev-only seed endpoint — only available when ADMIN_PASSWORD is not set (local dev)
+    if (url.pathname === '/api/seed' && request.method === 'POST' && !env.ADMIN_PASSWORD) {
+      return handleSeed(request, env);
+    }
+
+    // Fall through to static assets (Pages CDN)
+    return env.ASSETS.fetch(request);
   },
 
   async scheduled(event, env, ctx) {
@@ -114,7 +120,8 @@ async function handleVerifyPassword(request, env) {
 function checkAuth(request, env) {
   const authHeader = request.headers.get('Authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!env.ADMIN_PASSWORD || token !== env.ADMIN_PASSWORD) {
+  const expectedPassword = env.ADMIN_PASSWORD || 'dev';
+  if (token !== expectedPassword) {
     return new Response(JSON.stringify({ error: 'Unauthorised' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
@@ -432,6 +439,17 @@ async function resolveDriverCode(driverNumber) {
   } catch {
     return null;
   }
+}
+
+/* ============================================================
+   Dev-only seed handler
+   ============================================================ */
+async function handleSeed(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return errorResponse('Invalid JSON', 400); }
+  if (body['f1-data'])  await env.F1_DATA.put('f1-data',  JSON.stringify(body['f1-data']));
+  if (body['f1-teams']) await env.F1_DATA.put('f1-teams', JSON.stringify(body['f1-teams']));
+  return jsonResponse({ seeded: true });
 }
 
 /* ============================================================

@@ -1,4 +1,5 @@
 node_modules/
 .wrangler/
 v1-site/
+package-lock.json
 
