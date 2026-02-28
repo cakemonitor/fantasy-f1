@@ -129,10 +129,21 @@ function renderTeamList(teams) {
     });
   });
 
-  list.querySelectorAll('.team-color-input').forEach(input => {
-    input.addEventListener('input', () => {
-      const card = input.closest('.team-editor-card');
-      card.style.setProperty('--team-color', input.value);
+  list.querySelectorAll('.team-color-picker').forEach(picker => {
+    picker.addEventListener('input', () => {
+      const card = picker.closest('.team-editor-card');
+      card.querySelector('.team-color-hex').value = picker.value;
+      card.style.setProperty('--team-color', picker.value);
+    });
+  });
+
+  list.querySelectorAll('.team-color-hex').forEach(hex => {
+    hex.addEventListener('input', () => {
+      const card = hex.closest('.team-editor-card');
+      if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) {
+        card.querySelector('.team-color-picker').value = hex.value;
+        card.style.setProperty('--team-color', hex.value);
+      }
     });
   });
 }
@@ -167,8 +178,12 @@ function buildTeamCard(team, index) {
       <div class="team-editor-row">
         <div>
           <div class="field-label">Colour</div>
-          <input type="color" class="team-field team-color-input" data-index="${index}" data-field="color"
-            value="${escHtml(color)}" />
+          <div class="color-input-group">
+            <input type="color" class="team-color-picker" data-index="${index}"
+              value="${escHtml(color)}" />
+            <input type="text" class="team-field team-color-hex" data-index="${index}" data-field="color"
+              value="${escHtml(color)}" maxlength="7" placeholder="#888888" />
+          </div>
         </div>
         <div>
           <div class="field-label">Manual Adjustment (pts)</div>

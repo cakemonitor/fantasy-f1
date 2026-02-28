@@ -94,10 +94,18 @@ main {
   grid-template-columns: 1fr;
 }
 
+#chart-container {
+  order: -1;
+}
+
 @media (min-width: 860px) {
   .main-columns {
     grid-template-columns: 360px 1fr;
     align-items: start;
+  }
+
+  #chart-container {
+    order: 0;
   }
 }
 
@@ -403,6 +411,26 @@ button:disabled { opacity: .45; cursor: default; }
 }
 
 .team-editor-row.full { grid-template-columns: 1fr; }
+
+.color-input-group {
+  display: flex;
+  gap: .4rem;
+  align-items: center;
+}
+
+.color-input-group input[type="color"] {
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: .1rem;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.color-input-group .team-color-hex {
+  flex: 1;
+  font-family: monospace;
+  min-width: 0;
+}
 
 .field-label {
   font-size: .72rem;
