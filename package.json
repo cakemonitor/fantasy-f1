@@ -2,6 +2,7 @@
   "name": "fantasy-f1-v2",
   "version": "2.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "wrangler pages dev public --kv F1_DATA",
     "seed": "node scripts/seed-dev-kv.js",

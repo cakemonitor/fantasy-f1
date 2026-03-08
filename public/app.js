@@ -173,7 +173,10 @@ function renderLeaderboard(data) {
         <div class="team-rank${rankClass}">${rank}</div>
         <div class="team-info">
           <div class="team-name">${escHtml(team.name)}</div>
-          <div class="team-drivers">${team.drivers.map(escHtml).join(' · ')}</div>
+          <div class="team-drivers">${team.drivers.map(code => {
+            const pts = Object.values(standings).reduce((sum, r) => sum + (r[code]?.points || 0), 0);
+            return `${escHtml(code)} <span class="driver-pts">(${pts})</span>`;
+          }).join(' · ')}</div>
         </div>
         <div class="team-points">
           <div class="points-value">${total}</div>

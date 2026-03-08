@@ -212,6 +212,10 @@ main {
   color: var(--text-muted);
   margin-top: .15rem;
 }
+.driver-pts {
+  opacity: .6;
+  font-size: .75rem;
+}
 
 .team-points {
   text-align: right;

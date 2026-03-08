@@ -66,10 +66,13 @@ async function runCron(env) {
     console.log(`[cron] Fetching standings for ${event.key}`);
     try {
       const newStandings = await fetchStandingsForEvent(event, driverMap);
-      if (newStandings && Object.keys(newStandings).length > 0) {
+      const hasPoints = newStandings && Object.values(newStandings).some(d => d.points > 0);
+      if (newStandings && Object.keys(newStandings).length > 0 && hasPoints) {
         standings[event.key] = newStandings;
         changed = true;
         console.log(`[cron] Updated standings for ${event.key} (${Object.keys(newStandings).length} drivers)`);
+      } else if (newStandings && !hasPoints) {
+        console.warn(`[cron] Standings for ${event.key} all-zero — data not ready yet, will retry`);
       }
     } catch (err) {
       console.error(`[cron] Error fetching ${event.key}: ${err.message}`);
