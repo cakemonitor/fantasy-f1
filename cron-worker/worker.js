@@ -11,8 +11,9 @@ const SEASON = 2026;
 const RACE_POINTS   = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 const SPRINT_POINTS = [8, 7, 6, 5, 4, 3, 2, 1];
 
-/* ---- OpenF1 base URL ---- */
-const OPENF1_BASE = 'https://api.openf1.org/v1';
+/* ---- API base URLs ---- */
+const OPENF1_BASE  = 'https://api.openf1.org/v1';
+const JOLPICA_BASE = 'https://api.jolpi.ca/ergast/f1';
 
 export default {
   async scheduled(event, env, ctx) {
@@ -20,37 +21,52 @@ export default {
   },
 };
 
+const CALENDAR_REFRESH_MS = 7 * 24 * 60 * 60_000; // 7 days
+
 /* ============================================================
    Cron — fetch OpenF1, update KV
    ============================================================ */
 async function runCron(env) {
   console.log('[cron] Starting scheduled run');
 
-  // Load existing data
   let existing = await env.F1_DATA.get('f1-data', { type: 'json' }) || {};
   let calendar = existing.calendar || [];
   let standings = existing.standings || {};
-
-  // Refresh calendar at start of season or if empty
-  if (calendar.length === 0) {
-    console.log('[cron] Calendar empty — fetching from OpenF1');
-    calendar = await fetchCalendar();
-    if (!calendar.length) {
-      console.log('[cron] No calendar data available yet');
-      return;
-    }
-  }
+  let calendarUpdated = existing.calendarUpdated || null;
 
   const now = new Date();
+  let needsSave = false;
+
+  // Refresh calendar if empty or older than 7 days
+  const calendarAgeMs = calendarUpdated
+    ? now.getTime() - new Date(calendarUpdated).getTime()
+    : Infinity;
+
+  if (calendar.length === 0 || calendarAgeMs > CALENDAR_REFRESH_MS) {
+    const reason = calendar.length === 0 ? 'empty' : 'stale';
+    console.log(`[cron] Calendar ${reason} — fetching from Jolpica`);
+    const fresh = await fetchCalendar();
+    if (fresh.length) {
+      calendar = fresh;
+      calendarUpdated = now.toISOString();
+      needsSave = true;
+      console.log(`[cron] Calendar updated: ${fresh.length} rounds`);
+    } else if (calendar.length === 0) {
+      console.log('[cron] No calendar data available yet');
+      return;
+    } else {
+      console.warn('[cron] Calendar refresh failed — keeping existing calendar');
+    }
+  }
 
   // Find events that may have completed and need standings updated
   const eventsToCheck = getEventsNeedingUpdate(calendar, standings, now);
 
   if (eventsToCheck.length === 0) {
     console.log('[cron] No events to update at this time');
-    // Still save refreshed calendar if we fetched it
-    if (!existing.calendar?.length) {
-      await saveData(env, { ...existing, calendar, standings });
+    if (needsSave) {
+      await saveData(env, { season: SEASON, lastUpdated: existing.lastUpdated || now.toISOString(), calendarUpdated, calendar, standings });
+      console.log('[cron] KV updated (calendar refresh)');
     }
     return;
   }
@@ -60,8 +76,6 @@ async function runCron(env) {
   // Fetch driver roster once — numbers/names are stable across the season
   const driverMap = await loadDriverRoster(eventsToCheck[0]);
 
-  let changed = false;
-
   for (const event of eventsToCheck) {
     console.log(`[cron] Fetching standings for ${event.key}`);
     try {
@@ -69,7 +83,7 @@ async function runCron(env) {
       const hasPoints = newStandings && Object.values(newStandings).some(d => d.points > 0);
       if (newStandings && Object.keys(newStandings).length > 0 && hasPoints) {
         standings[event.key] = newStandings;
-        changed = true;
+        needsSave = true;
         console.log(`[cron] Updated standings for ${event.key} (${Object.keys(newStandings).length} drivers)`);
       } else if (newStandings && !hasPoints) {
         console.warn(`[cron] Standings for ${event.key} all-zero — data not ready yet, will retry`);
@@ -81,10 +95,11 @@ async function runCron(env) {
     await new Promise(r => setTimeout(r, 2000));
   }
 
-  if (changed || !existing.calendar?.length) {
+  if (needsSave) {
     await saveData(env, {
       season: SEASON,
       lastUpdated: now.toISOString(),
+      calendarUpdated,
       calendar,
       standings,
     });
@@ -296,47 +311,31 @@ async function computeStandingsFromResults(sessionKey, eventType, driverMap) {
 }
 
 /**
- * Fetch the race calendar from OpenF1 sessions for the current season.
+ * Fetch the race calendar from Jolpica (Ergast replacement).
+ * More reliable than OpenF1 for schedule changes — cancellations and
+ * postponements are reflected here sooner, and round numbers are authoritative.
  */
 async function fetchCalendar() {
   try {
-    // OpenF1 uses session_type=Race (capitalised) for both races and sprints;
-    // session_name distinguishes them ('Race' vs 'Sprint').
-    const url = `${OPENF1_BASE}/sessions?year=${SEASON}&session_type=Race`;
+    const url = `${JOLPICA_BASE}/${SEASON}/races.json?limit=100`;
     const res = await fetchWithTimeout(url, 15_000);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const all = await res.json();
+    const json = await res.json();
 
-    const raceSessions   = all.filter(s => s.session_name === 'Race');
-    const sprintSessions = all.filter(s => s.session_name === 'Sprint');
+    const races = json?.MRData?.RaceTable?.Races;
+    if (!Array.isArray(races) || races.length === 0) throw new Error('No races in response');
 
-    // Group sprints by meeting_key for easy lookup
-    const sprintByMeeting = {};
-    for (const s of sprintSessions) {
-      sprintByMeeting[s.meeting_key] = s;
-    }
-
-    // Build calendar entries
-    const calendar = [];
-    let round = 1;
-
-    // Sort race sessions by date
-    raceSessions.sort((a, b) => new Date(a.date_start) - new Date(b.date_start));
-
-    for (const session of raceSessions) {
-      const sprint = sprintByMeeting[session.meeting_key];
-      calendar.push({
-        round,
-        name:            session.meeting_name || session.circuit_short_name || `Round ${round}`,
-        raceDate:        session.date_start.slice(0, 10),
-        raceStartUtc:    session.date_start,
-        sprintDate:      sprint ? sprint.date_start.slice(0, 10) : null,
-        sprintStartUtc:  sprint ? sprint.date_start : null,
-      });
-      round++;
-    }
-
-    return calendar;
+    return races.map(race => {
+      const sprint = race.Sprint ?? null;
+      return {
+        round:          Number(race.round),
+        name:           race.raceName,
+        raceDate:       race.date,
+        raceStartUtc:   `${race.date}T${race.time || '00:00:00Z'}`,
+        sprintDate:     sprint ? sprint.date : null,
+        sprintStartUtc: sprint ? `${sprint.date}T${sprint.time || '00:00:00Z'}` : null,
+      };
+    });
   } catch (err) {
     console.error(`[cron] Calendar fetch failed: ${err.message}`);
     return [];

@@ -87,33 +87,23 @@ function renderEventPanel(data) {
 
   const rows = [];
 
-  // Most recent past event
+  // Most recent past event — only shown while data is still pending
   const lastEvent = past.at(-1);
+  let upcomingCount = 3;
   if (lastEvent) {
     const hasData  = Boolean(standings[lastEvent.key] && Object.keys(standings[lastEvent.key]).length > 0);
     const sessionEnd = new Date(lastEvent.startUtc).getTime() + lastEvent.durationMinutes * 60_000;
     const withinPendingWindow = now - sessionEnd < 2 * 60 * 60_000; // 2 hours
 
-    let status, icon, detail;
-    if (hasData) {
-      status = 'confirmed';
-      icon   = '✓';
-      detail = 'Data confirmed';
-    } else if (withinPendingWindow) {
-      status = 'pending';
-      icon   = '⏳';
-      detail = 'Data pending';
-    } else {
-      status = 'pending';
-      icon   = '⏳';
-      detail = 'Data not yet available';
+    if (!hasData) {
+      const detail = withinPendingWindow ? 'Data pending' : 'Data not yet available';
+      rows.push({ event: lastEvent, status: 'pending', icon: '⏳', detail, past: true });
+      upcomingCount = 2;
     }
-
-    rows.push({ event: lastEvent, status, icon, detail, past: true });
   }
 
-  // Next 2 upcoming events
-  for (const upcomingEvent of future.slice(0, 2)) {
+  // Upcoming events — 3 if last race is confirmed, 2 if it's still pending
+  for (const upcomingEvent of future.slice(0, upcomingCount)) {
     rows.push({
       event: upcomingEvent,
       status: 'upcoming',
