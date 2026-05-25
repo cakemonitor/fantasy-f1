@@ -184,9 +184,15 @@ async function fetchStandingsForEvent(event, driverMap) {
   }
 
   // Try OpenF1 championship_drivers endpoint
+  // Validate result: no driver should exceed max points for the session type
+  // (the beta endpoint sometimes returns cumulative season totals instead of incremental)
+  const maxPts = event.type === 'sprint' ? 8 : 25;
   try {
     const result = await fetchOpenF1Championship(sessionKey, driverMap);
-    if (result && Object.keys(result).length > 0) return result;
+    if (result && Object.keys(result).length > 0) {
+      if (Object.values(result).every(d => d.points <= maxPts)) return result;
+      console.warn(`[cron] championship_drivers returned cumulative data for ${event.key} — using fallback`);
+    }
   } catch (err) {
     console.warn(`[cron] OpenF1 championship failed for ${event.key}: ${err.message}`);
   }

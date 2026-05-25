@@ -197,13 +197,17 @@ function renderChart(data) {
     return;
   }
 
-  const labels = completedRounds.map(e => e.type === 'Sprint' ? `${e.name} (S)` : e.name);
+  // One data point per race weekend; sprint points folded into the race entry
+  const raceEvents = completedRounds.filter(e => e.type === 'Race');
+  const labels = raceEvents.map(e => e.name);
 
   const datasets = teams.map(team => {
     let cumulative = 0;
-    const dataPoints = completedRounds.map(event => {
-      const s = standings[event.key] || {};
-      cumulative += (team.drivers || []).reduce((sum, code) => sum + ((s[code]?.points) || 0), 0);
+    const dataPoints = raceEvents.map(event => {
+      const s  = standings[event.key] || {};
+      const ss = standings[`${event.key}_sprint`] || {};
+      cumulative += (team.drivers || []).reduce((sum, code) =>
+        sum + (s[code]?.points || 0) + (ss[code]?.points || 0), 0);
       return cumulative;
     });
     // Add manual adjustment to last data point
