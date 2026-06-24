@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('add-team-btn').addEventListener('click', addTeamRow);
   document.getElementById('save-teams-btn').addEventListener('click', saveTeams);
+  document.getElementById('refresh-standings-btn').addEventListener('click', handleRefreshStandings);
 
   // Close dialog when clicking backdrop
   document.getElementById('admin-panel').addEventListener('click', e => {
@@ -58,6 +59,7 @@ function showEditor(password) {
   document.getElementById('admin-auth').hidden   = true;
   document.getElementById('admin-editor').hidden = false;
   renderTeamEditor();
+  populateRefreshDropdown();
 }
 
 /* ============================================================
@@ -251,6 +253,98 @@ async function saveTeams() {
     btn.disabled = false;
     btn.textContent = 'Save Changes';
   }
+}
+
+/* ============================================================
+   Force-refresh standings for one past race/sprint
+   ============================================================ */
+function populateRefreshDropdown() {
+  const data = window.__f1AppData?.() || {};
+  const calendar = data.calendar || [];
+  const now = Date.now();
+  const minDelayMs = 30 * 60_000; // matches cron-worker's OpenF1 free-access delay
+
+  const events = [];
+  for (const round of calendar) {
+    if (round.sprintStartUtc) {
+      const endMs = new Date(round.sprintStartUtc).getTime() + 30 * 60_000;
+      if (endMs + minDelayMs < now) {
+        events.push({ key: `${round.round}_sprint`, label: `${round.name} — Sprint`, startUtc: round.sprintStartUtc });
+      }
+    }
+    const endMs = new Date(round.raceStartUtc).getTime() + 120 * 60_000;
+    if (endMs + minDelayMs < now) {
+      events.push({ key: String(round.round), label: `${round.name} — Race`, startUtc: round.raceStartUtc });
+    }
+  }
+  events.sort((a, b) => new Date(b.startUtc) - new Date(a.startUtc)); // most recent first
+
+  const select = document.getElementById('refresh-round-select');
+  const btn    = document.getElementById('refresh-standings-btn');
+
+  if (events.length === 0) {
+    select.innerHTML = '<option value="">No past races yet</option>';
+    btn.disabled = true;
+    return;
+  }
+
+  select.innerHTML = events.map(e => `<option value="${escHtml(e.key)}">${escHtml(e.label)}</option>`).join('');
+  btn.disabled = false;
+}
+
+async function handleRefreshStandings() {
+  const pw = sessionStorage.getItem(SESSION_KEY);
+  if (!pw) { showAuth(); return; }
+
+  const select = document.getElementById('refresh-round-select');
+  const key = select.value;
+  if (!key) return;
+  const label = select.options[select.selectedIndex].textContent;
+
+  const btn = document.getElementById('refresh-standings-btn');
+  btn.disabled = true;
+  btn.textContent = 'Rechecking…';
+  showRefreshStatus(`Rechecking ${label}…`, true, false);
+
+  try {
+    const res = await fetch('/api/refresh-standings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${pw}`,
+      },
+      body: JSON.stringify({ key }),
+    });
+
+    if (res.ok) {
+      const { updated, failed } = await res.json();
+      if (updated > 0) showRefreshStatus(`${label}: standings updated.`, true);
+      else if (failed?.length) showRefreshStatus(`${label}: couldn't fetch fresh data — left existing standings unchanged.`, false);
+      else showRefreshStatus(`${label}: no change — already up to date.`, true);
+      if (typeof loadData === 'function') loadData();
+    } else if (res.status === 401) {
+      sessionStorage.removeItem(SESSION_KEY);
+      showAuth();
+    } else if (res.status === 404) {
+      showRefreshStatus(`${label} isn't eligible yet (within the post-session delay window).`, false);
+    } else {
+      const body = await res.json().catch(() => ({}));
+      showRefreshStatus(body.error || `Refresh failed (HTTP ${res.status}).`, false);
+    }
+  } catch {
+    showRefreshStatus('Network error. Try again.', false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Recheck Selected Race';
+  }
+}
+
+function showRefreshStatus(msg, ok, autoHide = true) {
+  const el = document.getElementById('refresh-status');
+  el.textContent = msg;
+  el.className = `save-status ${ok ? 'ok' : 'err'}`;
+  el.hidden = false;
+  if (ok && autoHide) setTimeout(() => { el.hidden = true; }, 4000);
 }
 
 function collectTeamValues() {

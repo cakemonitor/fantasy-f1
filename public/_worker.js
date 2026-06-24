@@ -2,9 +2,10 @@
  * Fantasy F1 2026 — Cloudflare Pages Worker
  *
  * Routes:
- *   GET  /api/data          → serve standings + calendar + teams from KV
- *   POST /api/teams         → password-protected team config save to KV
- *   POST /api/teams/verify  → password verification only (no write)
+ *   GET  /api/data              → serve standings + calendar + teams from KV
+ *   POST /api/teams             → password-protected team config save to KV
+ *   POST /api/teams/verify      → password verification only (no write)
+ *   POST /api/refresh-standings → force-recheck one past event's standings (proxies to cron Worker)
  *
  * Cron is handled by the standalone fantasy-f1-cron Worker (cron-worker/).
  */
@@ -35,6 +36,12 @@ export default {
       const authErr = checkAuth(request, env);
       if (authErr) return authErr;
       return handleSeed(request, env);
+    }
+
+    if (url.pathname === '/api/refresh-standings' && request.method === 'POST') {
+      const authErr = checkAuth(request, env);
+      if (authErr) return authErr;
+      return handleRefreshStandings(request, env);
     }
 
     // Fall through to static assets (Pages CDN)
@@ -145,6 +152,32 @@ async function handleSeed(request, env) {
   if (body['f1-data'])  await env.F1_DATA.put('f1-data',  JSON.stringify(body['f1-data']));
   if (body['f1-teams']) await env.F1_DATA.put('f1-teams', JSON.stringify(body['f1-teams']));
   return jsonResponse({ seeded: true });
+}
+
+/* ============================================================
+   POST /api/refresh-standings — proxy to cron-worker /refresh
+   ============================================================ */
+async function handleRefreshStandings(request, env) {
+  if (!env.CRON_WORKER_URL) return errorResponse('CRON_WORKER_URL is not configured', 500);
+
+  const body = await request.text();
+  try {
+    const upstream = await fetch(`${env.CRON_WORKER_URL}/refresh`, {
+      method: 'POST',
+      headers: {
+        Authorization: request.headers.get('Authorization') || '',
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+    const responseBody = await upstream.text();
+    return new Response(responseBody, {
+      status: upstream.status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    return errorResponse(`Failed to reach cron worker: ${err.message}`, 502);
+  }
 }
 
 /* ============================================================

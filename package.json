@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler pages dev public --kv F1_DATA",
+    "dev": "wrangler pages dev public --persist-to .wrangler/state",
     "seed": "node scripts/seed-dev-kv.js",
     "deploy:pages": "wrangler pages deploy public --project-name fantasy-f1 --commit-dirty=true",
     "deploy:cron": "wrangler deploy --config cron-worker/wrangler.toml",
-    "cron:test": "wrangler dev cron-worker/worker.js --test-scheduled",
+    "cron:test": "wrangler dev cron-worker/worker.js --test-scheduled --persist-to .wrangler/state",
+    "dev:cron": "wrangler dev cron-worker/worker.js --persist-to .wrangler/state",
     "dev:swatch": "wrangler dev swatch-worker/worker.js",
     "deploy:swatch": "wrangler deploy --config swatch-worker/wrangler.toml"
   },

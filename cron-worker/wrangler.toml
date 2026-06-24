@@ -9,3 +9,6 @@ preview_id = "99f988bef7394a21a3becf05b12bebfd"
 
 [triggers]
 crons = ["*/10 * * * *"]
+
+# ADMIN_PASSWORD is set via: npx wrangler secret put ADMIN_PASSWORD --config cron-worker/wrangler.toml
+# Must match the Pages Worker's ADMIN_PASSWORD — the admin panel reuses one password end-to-end.

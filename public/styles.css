@@ -347,6 +347,7 @@ dialog::backdrop {
   gap: .5rem;
 }
 
+select,
 input[type="password"],
 input[type="text"],
 input[type="number"] {
@@ -474,3 +475,11 @@ button:disabled { opacity: .45; cursor: default; }
 }
 .save-status.ok  { color: var(--green); }
 .save-status.err { color: #ff6b88; }
+
+.refresh-row {
+  display: flex;
+  gap: .5rem;
+  padding-top: .75rem;
+  border-top: 1px solid var(--border);
+}
+.refresh-row select { flex: 1; }

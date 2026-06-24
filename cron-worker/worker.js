@@ -19,7 +19,106 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runCron(env));
   },
+
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (url.pathname === '/refresh' && request.method === 'POST') {
+      return handleManualRefresh(request, env);
+    }
+
+    return new Response('Not found', { status: 404 });
+  },
 };
+
+/* ============================================================
+   POST /refresh — manual single-event recheck, triggered from
+   the admin panel via the Pages Worker's /api/refresh-standings
+   proxy. Overwrites standings for one past event even if it
+   already has data, to pick up post-hoc corrections (e.g. a
+   stewards' appeal reinstating a position after the original
+   fetch already succeeded).
+   ============================================================ */
+async function handleManualRefresh(request, env) {
+  const authHeader = request.headers.get('Authorization') || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!env.ADMIN_PASSWORD || token !== env.ADMIN_PASSWORD) {
+    return new Response(JSON.stringify({ error: 'Unauthorised' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  if (!body?.key) {
+    return new Response(JSON.stringify({ error: 'Missing "key"' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    const result = await refreshOneEvent(env, body.key);
+    return new Response(JSON.stringify(result), {
+      status: result.error ? 404 : 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+/**
+ * Force-recheck a single past event by key, regardless of whether it
+ * already has standings. Overwrites only if the fresh result is real
+ * (non-empty, not all-zero) and actually differs from what's stored.
+ */
+async function refreshOneEvent(env, key) {
+  const existing  = await env.F1_DATA.get('f1-data', { type: 'json' }) || {};
+  const calendar  = existing.calendar || [];
+  const standings = existing.standings || {};
+  const now = new Date();
+
+  const candidates = getEventsNeedingUpdate(calendar, standings, now, true);
+  const event = candidates.find(e => e.key === key);
+  if (!event) {
+    return { error: `No eligible past event found for "${key}"` };
+  }
+
+  const driverMap = await loadDriverRoster(event);
+  const fresh = await fetchStandingsForEvent(event, driverMap);
+  const hasPoints = fresh && Object.values(fresh).some(d => d.points > 0);
+
+  if (!fresh || Object.keys(fresh).length === 0 || !hasPoints) {
+    return { checked: 1, updated: 0, updatedKeys: [], failed: [key] };
+  }
+
+  const changed = JSON.stringify(fresh) !== JSON.stringify(standings[key] || null);
+  if (!changed) {
+    return { checked: 1, updated: 0, updatedKeys: [], failed: [] };
+  }
+
+  standings[key] = fresh;
+  await saveData(env, {
+    season: SEASON,
+    lastUpdated: now.toISOString(),
+    calendarUpdated: existing.calendarUpdated || null,
+    calendar,
+    standings,
+  });
+  return { checked: 1, updated: 1, updatedKeys: [key], failed: [] };
+}
 
 const CALENDAR_REFRESH_MS = 7 * 24 * 60 * 60_000; // 7 days
 
@@ -108,11 +207,14 @@ async function runCron(env) {
 }
 
 /**
- * Returns past events whose standings we don't yet have.
+ * Returns past events whose standings we don't yet have (or, if forceAll
+ * is true, every past event regardless of existing standings — used by
+ * the manual /refresh endpoint to look up a specific event by key even
+ * if it already has data).
  * Retries indefinitely every cron invocation until data is retrieved —
  * the cron only calls OpenF1 when there is genuinely missing data.
  */
-function getEventsNeedingUpdate(calendar, standings, now) {
+function getEventsNeedingUpdate(calendar, standings, now, forceAll = false) {
   const events = [];
   const minDelayMs = 30 * 60_000; // 30 min OpenF1 free-access delay post-session
 
@@ -122,7 +224,7 @@ function getEventsNeedingUpdate(calendar, standings, now) {
       const key    = `${round.round}_sprint`;
       const endMs  = new Date(round.sprintStartUtc).getTime() + 30 * 60_000;
 
-      if (endMs + minDelayMs < now.getTime() && !standings[key]) {
+      if (endMs + minDelayMs < now.getTime() && (forceAll || !standings[key])) {
         events.push({ key, round: round.round, type: 'sprint', startUtc: round.sprintStartUtc });
       }
     }
@@ -132,7 +234,7 @@ function getEventsNeedingUpdate(calendar, standings, now) {
       const key   = String(round.round);
       const endMs = new Date(round.raceStartUtc).getTime() + 120 * 60_000;
 
-      if (endMs + minDelayMs < now.getTime() && !standings[key]) {
+      if (endMs + minDelayMs < now.getTime() && (forceAll || !standings[key])) {
         events.push({ key, round: round.round, type: 'race', startUtc: round.raceStartUtc });
       }
     }
